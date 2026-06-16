@@ -453,7 +453,13 @@ class WhisperServerManager extends EventEmitter {
       if (!this.process || this.process.killed) {
         const info = getProcessInfo ? getProcessInfo() : {};
         const stderr = info.stderr ? info.stderr.trim().slice(0, 200) : "";
-        const details = stderr || (info.exitCode !== null ? `exit code: ${info.exitCode}` : "");
+        const details =
+          stderr ||
+          (info.exitCode !== null
+            ? `exit code: ${info.exitCode}`
+            : info.exitSignal
+              ? `signal: ${info.exitSignal}`
+              : "");
         const hint = getStartupCrashHint(info);
         throw new Error(
           `whisper-server process died during startup${details ? `: ${details}` : ""}${hint}`
