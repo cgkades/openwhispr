@@ -1,10 +1,7 @@
 import type { CalendarAttendee } from "../types/calendar";
 
-/**
- * Expected total speaker count for a meeting note: the explicit stored value when
- * present, otherwise derived from the calendar participants (non-self attendees + you).
- * Returns null when there's no signal, letting callers fall back to their default.
- */
+// Expected total speaker count for a meeting note: the stored value, else derived from
+// calendar participants (non-self attendees + you), else null so callers use their default.
 export const resolveExpectedSpeakerCount = (note?: {
   expected_speaker_count?: number | null;
   participants?: string | null;

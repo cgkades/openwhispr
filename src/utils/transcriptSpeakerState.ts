@@ -111,9 +111,8 @@ const mergeSpeakerFields = (existing: TranscriptSegment, incoming: TranscriptSeg
   }
 
   if (isTranscriptSpeakerLocked(existing)) {
-    // Preserve the user's chosen name and lock, but let offline diarization refine the
-    // underlying speaker cluster — otherwise a single locked label freezes a bucket that
-    // diarization splits into multiple speakers.
+    // Keep the user's name/lock but let diarization refine the speaker cluster, so one
+    // locked label can't freeze a bucket diarization splits into multiple speakers.
     for (const field of SPEAKER_STATE_FIELDS) {
       if (field === "speaker" || field === "speakerIsPlaceholder") continue;
       if (existingFields[field] !== undefined) {

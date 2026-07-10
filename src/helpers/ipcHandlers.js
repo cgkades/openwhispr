@@ -5782,9 +5782,8 @@ class IPCHandlers {
         meetingOneOnOneProfileBound = false;
         meetingNoteId = options.noteId ?? null;
 
-        // Seed the speaker cap from the note (and its calendar participants) so live
-        // identification isn't stuck at the default when the renderer never pushes a
-        // config. Kept in memory for the whole session, immune to later note edits/sync.
+        // Seed the speaker cap from the note/calendar participants up front so live
+        // identification isn't stuck at the default if the renderer never pushes a config.
         if (!this.activeMeetingSpeakerConfig) {
           this.activeMeetingSpeakerConfig = this._resolveInitialMeetingSpeakerConfig(meetingNoteId);
         }
