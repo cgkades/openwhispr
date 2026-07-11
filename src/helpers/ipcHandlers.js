@@ -37,7 +37,7 @@ const {
   canAutoRelabelSpeaker,
   isSpeakerLocked,
 } = require("./speakerAssignmentPolicy");
-const { downsample24kTo16k, pcm16ToWav } = require("../utils/audioUtils");
+const { downsample24kTo16k, pcm16ToWav, pcm16ToFloat32 } = require("../utils/audioUtils");
 const postMigrationDetector = require("./postMigrationDetector");
 const {
   DEFAULT_EXPECTED_SPEAKER_COUNT,
@@ -5508,11 +5508,19 @@ class IPCHandlers {
     let dictationPreviewLanguage = null;
     let dictationPreviewSessionActive = false;
     let dictationPreviewChunkCount = 0;
+    // Persistent stream to the sherpa-onnx online server; set only for
+    // online-runtime models (Nemotron). When active it replaces the
+    // 1.5s buffered-chunk transcription path.
+    let dictationPreviewStream = null;
 
     const resetDictationPreviewState = ({ preserveSession = false } = {}) => {
       if (dictationPreviewTimer) {
         clearInterval(dictationPreviewTimer);
         dictationPreviewTimer = null;
+      }
+      if (dictationPreviewStream) {
+        dictationPreviewStream.abort();
+        dictationPreviewStream = null;
       }
       dictationPreviewMode = false;
       if (!preserveSession) {
@@ -6215,6 +6223,38 @@ class IPCHandlers {
       dictationPreviewLanguage = language || null;
       dictationPreviewChunkCount = 0;
       this.windowManager.showTranscriptionPreview("");
+
+      if (provider === "nvidia" && this.parakeetManager?.getModelRuntime?.(model) === "online") {
+        try {
+          const stream = await this.parakeetManager.createOnlineStream(model, {
+            onUpdate: (text) => {
+              if (dictationPreviewMode && dictationPreviewStream === stream && text) {
+                this.windowManager.showTranscriptionPreview(text);
+              }
+            },
+          });
+          // The preview may have been dismissed or restarted while the
+          // streaming server was warming up.
+          if (!dictationPreviewMode || dictationPreviewModel !== model || dictationPreviewStream) {
+            stream.abort();
+            return { success: true };
+          }
+          dictationPreviewStream = stream;
+          // Feed audio that arrived while the streaming server was starting.
+          for (const chunk of dictationPreviewBuffer) {
+            dictationPreviewStream.sendPcm(pcm16ToFloat32(chunk));
+          }
+          dictationPreviewBuffer = [];
+          return { success: true };
+        } catch (error) {
+          debugLogger.warn(
+            "Online preview stream unavailable, falling back to chunked preview",
+            { model, error: error.message }
+          );
+        }
+      }
+
+      if (!dictationPreviewMode) return { success: true };
       dictationPreviewTimer = setInterval(() => transcribeDictationPreviewChunk(), 1500);
       return { success: true };
     });
@@ -6229,9 +6269,12 @@ class IPCHandlers {
           bufferSize: dictationPreviewBuffer.length,
         });
       }
-      dictationPreviewBuffer.push(
-        Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer)
-      );
+      const pcm = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
+      if (dictationPreviewStream) {
+        dictationPreviewStream.sendPcm(pcm16ToFloat32(pcm));
+        return;
+      }
+      dictationPreviewBuffer.push(pcm);
     });
 
     ipcMain.handle("dismiss-dictation-preview", async () => {
@@ -6272,7 +6315,16 @@ class IPCHandlers {
       }
       clearInterval(dictationPreviewTimer);
       dictationPreviewTimer = null;
-      await transcribeDictationPreviewChunk();
+      if (dictationPreviewStream) {
+        const stream = dictationPreviewStream;
+        dictationPreviewStream = null;
+        const { text } = await stream.finish().catch(() => ({ text: "" }));
+        if (text && dictationPreviewSessionActive) {
+          this.windowManager.showTranscriptionPreview(text);
+        }
+      } else {
+        await transcribeDictationPreviewChunk();
+      }
       resetDictationPreviewState({ preserveSession: true });
       if (!dictationPreviewSessionActive) {
         return { success: true };

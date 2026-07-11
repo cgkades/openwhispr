@@ -193,6 +193,14 @@ class ParakeetServerManager {
   getServerStatus() {
     return this.wsServer.getStatus();
   }
+
+  getModelRuntime(modelName) {
+    return this.wsServer.getModelRuntime(modelName);
+  }
+
+  createOnlineStream(options) {
+    return this.wsServer.createOnlineStream(options);
+  }
 }
 
 module.exports = ParakeetServerManager;

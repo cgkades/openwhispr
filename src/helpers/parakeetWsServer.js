@@ -356,6 +356,103 @@ class ParakeetWsServer {
     });
   }
 
+  // Opens a persistent connection to the online (streaming) server so callers
+  // can feed PCM as it is captured and receive live transcript updates —
+  // used by the dictation live preview. Offline-runtime models can't do this;
+  // they keep the buffered chunk-by-chunk path.
+  createOnlineStream({ onUpdate } = {}) {
+    if (!this.ready || !this.process) {
+      throw new Error("parakeet-ws server is not running");
+    }
+    if (this.modelRuntime !== "online") {
+      throw new Error("createOnlineStream requires an online-runtime model");
+    }
+
+    const messages = [];
+    const pendingChunks = [];
+    let wsOpen = false;
+    let finishRequested = false;
+    let finishResolve = null;
+    let closed = false;
+
+    const currentText = () => parseOnlineMessages(messages);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${this.port}`);
+
+    const settle = () => {
+      if (closed) return;
+      closed = true;
+      if (finishResolve) finishResolve({ text: currentText() });
+    };
+
+    ws.on("open", () => {
+      wsOpen = true;
+      for (const chunk of pendingChunks) {
+        ws.send(chunk);
+      }
+      pendingChunks.length = 0;
+      if (finishRequested) ws.send("Done");
+    });
+
+    ws.on("message", (data) => {
+      const message = data.toString();
+      if (message === "Done!") {
+        ws.close();
+        return;
+      }
+      messages.push(message);
+      if (!closed) onUpdate?.(currentText());
+    });
+
+    ws.on("close", () => settle());
+
+    ws.on("error", (error) => {
+      debugLogger.warn("parakeet-ws online stream error", { error: error.message });
+      settle();
+    });
+
+    return {
+      sendPcm: (float32Buffer) => {
+        if (closed || finishRequested) return;
+        if (wsOpen) {
+          ws.send(float32Buffer, (err) => {
+            if (err) {
+              debugLogger.error("parakeet-ws online stream send error", { error: err.message });
+            }
+          });
+        } else {
+          pendingChunks.push(float32Buffer);
+        }
+      },
+      finish: () =>
+        new Promise((resolve) => {
+          if (closed) {
+            resolve({ text: currentText() });
+            return;
+          }
+          finishResolve = resolve;
+          finishRequested = true;
+          if (wsOpen) ws.send("Done");
+          // Backstop in case the server never acknowledges with "Done!".
+          setTimeout(() => {
+            if (!closed) {
+              try {
+                ws.close();
+              } catch {}
+              settle();
+            }
+          }, 10000).unref?.();
+        }),
+      abort: () => {
+        if (closed) return;
+        closed = true;
+        try {
+          ws.close();
+        } catch {}
+      },
+    };
+  }
+
   async stop() {
     this.stopHealthCheck();
 

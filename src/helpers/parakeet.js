@@ -185,6 +185,25 @@ class ParakeetManager {
     return this.serverManager.getServerStatus();
   }
 
+  getModelRuntime(modelName) {
+    return this.serverManager.getModelRuntime(modelName);
+  }
+
+  // Persistent live-transcription stream for online-runtime models (Nemotron).
+  // Ensures the streaming server is up for the model, then hands back a
+  // stream handle: { sendPcm, finish, abort }.
+  async createOnlineStream(modelName, options = {}) {
+    this.validateModelName(modelName);
+    if (this.getModelRuntime(modelName) !== "online") {
+      throw new Error(`Model "${modelName}" does not use the online streaming runtime`);
+    }
+    const started = await this.serverManager.startServer(modelName);
+    if (!started.success) {
+      throw new Error(started.reason || "Failed to start parakeet streaming server");
+    }
+    return this.serverManager.createOnlineStream(options);
+  }
+
   async transcribeLocalParakeet(audioBlob, options = {}) {
     const model = options.model || "parakeet-tdt-0.6b-v3";
 
