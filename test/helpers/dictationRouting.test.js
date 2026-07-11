@@ -172,3 +172,98 @@ test("disabling the dictation agent overrides cloud reachability", async () => {
     false
   );
 });
+
+test("prewarm resolves the local cleanup model on normal dictations", async () => {
+  const { resolveLocalReasoningPrewarmModel } = await load();
+
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: true,
+      cleanupMode: "local",
+      cleanupModel: "llama-3.1-8b-instruct-q4_k_m",
+      useDictationAgent: true,
+      dictationAgentMode: "openwhispr",
+      dictationAgentModel: "",
+      voiceAgentRequested: false,
+    }),
+    "llama-3.1-8b-instruct-q4_k_m"
+  );
+});
+
+test("prewarm falls back to a local dictation-agent model when cleanup is not local", async () => {
+  const { resolveLocalReasoningPrewarmModel } = await load();
+
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: true,
+      cleanupMode: "openwhispr",
+      cleanupModel: "",
+      useDictationAgent: true,
+      dictationAgentMode: "local",
+      dictationAgentModel: "qwen3-8b",
+      voiceAgentRequested: false,
+    }),
+    "qwen3-8b"
+  );
+});
+
+test("voice-agent recordings prewarm only the agent model", async () => {
+  const { resolveLocalReasoningPrewarmModel } = await load();
+
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: true,
+      cleanupMode: "local",
+      cleanupModel: "llama-3.1-8b-instruct-q4_k_m",
+      useDictationAgent: true,
+      dictationAgentMode: "local",
+      dictationAgentModel: "qwen3-8b",
+      voiceAgentRequested: true,
+    }),
+    "qwen3-8b"
+  );
+
+  // Voice-agent route never falls back to cleanup, so neither does its prewarm.
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: true,
+      cleanupMode: "local",
+      cleanupModel: "llama-3.1-8b-instruct-q4_k_m",
+      useDictationAgent: true,
+      dictationAgentMode: "openwhispr",
+      dictationAgentModel: "",
+      voiceAgentRequested: true,
+    }),
+    null
+  );
+});
+
+test("prewarm skips disabled scopes and blank models", async () => {
+  const { resolveLocalReasoningPrewarmModel } = await load();
+
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: false,
+      cleanupMode: "local",
+      cleanupModel: "llama-3.1-8b-instruct-q4_k_m",
+      useDictationAgent: false,
+      dictationAgentMode: "local",
+      dictationAgentModel: "qwen3-8b",
+      voiceAgentRequested: false,
+    }),
+    null
+  );
+
+  assert.equal(
+    resolveLocalReasoningPrewarmModel({
+      useCleanupModel: true,
+      cleanupMode: "local",
+      cleanupModel: "   ",
+      useDictationAgent: true,
+      dictationAgentMode: "providers",
+      dictationAgentModel: "claude-sonnet-5",
+      voiceAgentRequested: false,
+    }),
+    null
+  );
+});

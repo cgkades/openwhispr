@@ -3258,6 +3258,19 @@ class IPCHandlers {
       }
     });
 
+    // Best-effort llama-server pre-warm, fired when a recording starts so the
+    // cold start (spawn + model load) overlaps the recording instead of
+    // delaying the transcript. No-op while the server is already warm.
+    ipcMain.handle("prewarm-local-reasoning", async (_event, modelId) => {
+      try {
+        const modelManager = require("./modelManagerBridge").default;
+        const started = await modelManager.prewarmServer(modelId);
+        return { success: started };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+
     ipcMain.handle(
       "process-anthropic-reasoning",
       async (event, text, modelId, _agentName, config) => {

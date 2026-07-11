@@ -1,5 +1,6 @@
 import type { InferenceProvider } from "./types";
 import { wrapCleanupTranscript } from "../../../config/prompts";
+import { buildLocalReasoningOptions } from "../../../helpers/localReasoningOptions";
 import logger from "../../../utils/logger";
 
 export const localProvider: InferenceProvider = {
@@ -16,10 +17,12 @@ export const localProvider: InferenceProvider = {
 
     const systemPrompt = config.systemPrompt || ctx.getSystemPrompt(agentName);
     const userContent = config.systemPrompt ? text : wrapCleanupTranscript(text);
-    const result = await window.electronAPI.processLocalReasoning(userContent, model, agentName, {
-      ...config,
-      systemPrompt,
-    });
+    const result = await window.electronAPI.processLocalReasoning(
+      userContent,
+      model,
+      agentName,
+      buildLocalReasoningOptions(config, systemPrompt)
+    );
 
     const processingTimeMs = Date.now() - startTime;
 

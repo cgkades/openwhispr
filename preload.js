@@ -435,6 +435,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   processLocalReasoning: (text, modelId, agentName, config) =>
     ipcRenderer.invoke("process-local-reasoning", text, modelId, agentName, config),
   checkLocalReasoningAvailable: () => ipcRenderer.invoke("check-local-reasoning-available"),
+  prewarmLocalReasoning: (modelId) => ipcRenderer.invoke("prewarm-local-reasoning", modelId),
 
   // Anthropic reasoning
   processAnthropicReasoning: (text, modelId, agentName, config) =>

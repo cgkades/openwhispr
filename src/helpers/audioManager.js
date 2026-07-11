@@ -31,7 +31,11 @@ import {
 } from "./selfHostedTranscription";
 import { resolveStreamingFallbackTarget } from "./transcriptionFallback";
 import { detectAgentName } from "../config/agentDetection";
-import { resolveDictationRouteKind, resolveDictationAgentReachability } from "./dictationRouting";
+import {
+  resolveDictationRouteKind,
+  resolveDictationAgentReachability,
+  resolveLocalReasoningPrewarmModel,
+} from "./dictationRouting";
 import { resolvePrompt } from "../config/prompts";
 import { syncService } from "../services/SyncService.js";
 import { evaluateFinishedRecording } from "./recordingValidation";
@@ -323,6 +327,31 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
     this.voiceAgentRequested = requested;
   }
 
+  // Fire-and-forget: spin up llama-server while the user is still speaking so
+  // local cleanup doesn't pay the cold start (spawn + system-prompt eval,
+  // several seconds) after the recording stops. No-op when the server is
+  // already warm or reasoning doesn't resolve to a local model.
+  prewarmLocalReasoning() {
+    try {
+      if (this.skipReasoning) return;
+      const settings = getSettings();
+      const model = resolveLocalReasoningPrewarmModel({
+        useCleanupModel: settings.useCleanupModel,
+        cleanupMode: settings.cleanupMode,
+        cleanupModel: settings.cleanupModel,
+        useDictationAgent: settings.useDictationAgent,
+        dictationAgentMode: settings.dictationAgentMode,
+        dictationAgentModel: settings.dictationAgentModel,
+        voiceAgentRequested: this.voiceAgentRequested,
+      });
+      if (model) {
+        window.electronAPI?.prewarmLocalReasoning?.(model)?.catch?.(() => {});
+      }
+    } catch {
+      // best-effort only — never block or fail a recording over pre-warming
+    }
+  }
+
   setContext(context) {
     this.context = context;
   }
@@ -455,6 +484,8 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
       if (this.isRecording || this.isProcessing || this.mediaRecorder?.state === "recording") {
         return false;
       }
+
+      this.prewarmLocalReasoning();
 
       const constraints = await this.getAudioConstraints(forceDefaultMic);
       const micStream = await reacquireIfDead(
@@ -2661,6 +2692,8 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
       }
 
       this.stopRequestedDuringStreamingStart = false;
+
+      this.prewarmLocalReasoning();
 
       const t0 = performance.now();
       const constraints = await this.getAudioConstraints(forceDefaultMic);

@@ -33,7 +33,9 @@ class LocalReasoningService {
     try {
       const inferenceConfig = {
         maxTokens: config.maxTokens || this.calculateMaxTokens(text.length),
-        temperature: config.temperature || 0.7,
+        // ?? not ||: cleanup pins temperature to 0 (a deterministic transform),
+        // and || would silently replace that 0 with the chat default.
+        temperature: config.temperature ?? 0.7,
         topK: config.topK || 40,
         topP: config.topP || 0.9,
         repeatPenalty: config.repeatPenalty || 1.1,

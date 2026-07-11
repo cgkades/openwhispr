@@ -8,6 +8,7 @@ import whisperVadConstants from "../constants/whisperVad.json";
 import type { LocalTranscriptionProvider, InferenceMode, SelfHostedType } from "../types/electron";
 import type { GoogleCalendarAccount } from "../types/calendar";
 import { PROMPT_KIND_LIST, type PromptKind } from "../config/prompts/registry";
+import { isRetiredDefaultPrompt } from "../config/retiredPrompts";
 import { deriveReasoningMode, buildReasoningScopePatches } from "../helpers/reasoningRouting";
 import {
   INFERENCE_SCOPES,
@@ -349,6 +350,32 @@ function migrateCustomPrompts() {
 }
 
 migrateCustomPrompts();
+
+// One-time sweep: drop "custom" prompts that are really frozen copies of
+// retired shipped defaults (persisted by old releases, then carried forward by
+// migrateCustomPrompts above). They shadow every prompt fix shipped since —
+// most damaging on the cleanup path, where the retired two-mode prompt makes
+// dictation cleanup answer dictated questions instead of transcribing them.
+// Genuine customizations don't match the fingerprints and are kept; swept
+// values are archived under `<key>.retired` rather than deleted.
+function sweepRetiredCustomPrompts() {
+  if (!isBrowser) return;
+  if (localStorage.getItem("_retiredPromptsSwept") === "1") return;
+
+  for (const kind of ["cleanup", "dictationAgent"]) {
+    const key = `customPrompt.${kind}`;
+    const value = localStorage.getItem(key);
+    if (value && isRetiredDefaultPrompt(value)) {
+      localStorage.setItem(`${key}.retired`, value);
+      localStorage.removeItem(key);
+      logger.info("Cleared retired default prompt override", { kind }, "settings");
+    }
+  }
+
+  localStorage.setItem("_retiredPromptsSwept", "1");
+}
+
+sweepRetiredCustomPrompts();
 
 // One-time migration of legacy LLM-scope localStorage keys. Safe to delete
 // after a few releases.

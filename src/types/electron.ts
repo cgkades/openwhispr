@@ -859,6 +859,7 @@ declare global {
         config: any
       ) => Promise<{ success: boolean; text?: string; error?: string }>;
       checkLocalReasoningAvailable: () => Promise<boolean>;
+      prewarmLocalReasoning: (modelId: string) => Promise<{ success: boolean; error?: string }>;
 
       // Anthropic reasoning
       processAnthropicReasoning: (
