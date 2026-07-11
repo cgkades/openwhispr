@@ -37,7 +37,7 @@ const {
   canAutoRelabelSpeaker,
   isSpeakerLocked,
 } = require("./speakerAssignmentPolicy");
-const { downsample24kTo16k, pcm16ToWav, pcm16ToFloat32 } = require("../utils/audioUtils");
+const { downsample24kTo16k, pcm16ToWav } = require("../utils/audioUtils");
 const postMigrationDetector = require("./postMigrationDetector");
 const {
   DEFAULT_EXPECTED_SPEAKER_COUNT,
@@ -5512,8 +5512,11 @@ class IPCHandlers {
     // online-runtime models (Nemotron). When active it replaces the
     // 1.5s buffered-chunk transcription path.
     let dictationPreviewStream = null;
+    // Bumped on every reset so async preview work can detect a stale session.
+    let dictationPreviewGen = 0;
 
     const resetDictationPreviewState = ({ preserveSession = false } = {}) => {
+      dictationPreviewGen++;
       if (dictationPreviewTimer) {
         clearInterval(dictationPreviewTimer);
         dictationPreviewTimer = null;
@@ -6216,6 +6219,7 @@ class IPCHandlers {
 
     ipcMain.handle("start-dictation-preview", async (_event, { provider, model, language }) => {
       resetDictationPreviewState();
+      const gen = dictationPreviewGen;
       dictationPreviewMode = true;
       dictationPreviewSessionActive = true;
       dictationPreviewProvider = provider;
@@ -6224,37 +6228,37 @@ class IPCHandlers {
       dictationPreviewChunkCount = 0;
       this.windowManager.showTranscriptionPreview("");
 
-      if (provider === "nvidia" && this.parakeetManager?.getModelRuntime?.(model) === "online") {
+      if (provider === "nvidia" && this.parakeetManager.supportsOnlineStreaming(model)) {
         try {
           const stream = await this.parakeetManager.createOnlineStream(model, {
             onUpdate: (text) => {
-              if (dictationPreviewMode && dictationPreviewStream === stream && text) {
+              if (gen === dictationPreviewGen && text) {
                 this.windowManager.showTranscriptionPreview(text);
               }
             },
           });
           // The preview may have been dismissed or restarted while the
           // streaming server was warming up.
-          if (!dictationPreviewMode || dictationPreviewModel !== model || dictationPreviewStream) {
+          if (gen !== dictationPreviewGen) {
             stream.abort();
             return { success: true };
           }
           dictationPreviewStream = stream;
           // Feed audio that arrived while the streaming server was starting.
           for (const chunk of dictationPreviewBuffer) {
-            dictationPreviewStream.sendPcm(pcm16ToFloat32(chunk));
+            stream.sendPcm16(chunk);
           }
           dictationPreviewBuffer = [];
           return { success: true };
         } catch (error) {
-          debugLogger.warn(
-            "Online preview stream unavailable, falling back to chunked preview",
-            { model, error: error.message }
-          );
+          debugLogger.warn("Online preview stream unavailable, falling back to chunked preview", {
+            model,
+            error: error.message,
+          });
         }
       }
 
-      if (!dictationPreviewMode) return { success: true };
+      if (gen !== dictationPreviewGen) return { success: true };
       dictationPreviewTimer = setInterval(() => transcribeDictationPreviewChunk(), 1500);
       return { success: true };
     });
@@ -6271,7 +6275,7 @@ class IPCHandlers {
       }
       const pcm = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
       if (dictationPreviewStream) {
-        dictationPreviewStream.sendPcm(pcm16ToFloat32(pcm));
+        dictationPreviewStream.sendPcm16(pcm);
         return;
       }
       dictationPreviewBuffer.push(pcm);

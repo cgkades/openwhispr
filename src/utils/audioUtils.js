@@ -41,7 +41,7 @@ function pcm16ToFloat32(pcmBuffer) {
   for (let i = 0; i < input.length; i++) {
     output[i] = input[i] / 32768;
   }
-  return Buffer.from(output.buffer, output.byteOffset, output.byteLength);
+  return output;
 }
 
 module.exports = {

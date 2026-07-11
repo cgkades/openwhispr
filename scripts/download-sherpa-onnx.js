@@ -2,7 +2,13 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
-const { downloadFile, findBinaryInDir, parseArgs, setExecutable } = require("./lib/download-utils");
+const {
+  cleanupFiles,
+  downloadFile,
+  findBinaryInDir,
+  parseArgs,
+  setExecutable,
+} = require("./lib/download-utils");
 
 const SHERPA_ONNX_VERSION = "1.13.4";
 const GITHUB_RELEASE_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_ONNX_VERSION}`;
@@ -103,12 +109,11 @@ function matchesPattern(filename, pattern) {
   return false;
 }
 
-function copyBinary(extractDir, binaryPath, outputPath, label, platformArch) {
-  const binaryName = path.basename(binaryPath);
+function copyBinary(extractDir, binaryName, outputPath, platformArch) {
   const foundPath = findBinaryInDir(extractDir, binaryName);
 
   if (!foundPath || !fs.existsSync(foundPath)) {
-    console.error(`  ${platformArch}: ${label} binary '${binaryName}' not found in archive`);
+    console.error(`  ${platformArch}: Binary '${binaryName}' not found in archive`);
     return false;
   }
 
@@ -162,12 +167,12 @@ async function downloadBinary(platformArch, config, isForce = false) {
     fs.mkdirSync(extractDir, { recursive: true });
     extractTarBz2(archivePath, extractDir);
 
-    for (const [binaryPath, destPath, label] of [
-      [config.binaryPath, outputPath, "Offline WebSocket"],
-      [config.onlineBinaryPath, onlineOutputPath, "Online WebSocket"],
-      [config.diarizeBinaryPath, diarizeOutputPath, "Diarization"],
+    for (const [binaryName, destPath] of [
+      [config.binaryPath, outputPath],
+      [config.onlineBinaryPath, onlineOutputPath],
+      [config.diarizeBinaryPath, diarizeOutputPath],
     ]) {
-      if (!copyBinary(extractDir, binaryPath, destPath, label, platformArch)) return false;
+      if (!copyBinary(extractDir, binaryName, destPath, platformArch)) return false;
     }
 
     // Copy shared libraries
@@ -262,22 +267,11 @@ async function main() {
     }
 
     if (args.shouldCleanup) {
-      const wsPrefix = `sherpa-onnx-ws-${args.platformArch}`;
-      const onlineWsPrefix = `sherpa-onnx-online-ws-${args.platformArch}`;
-      const diarizePrefix = `sherpa-onnx-diarize-${args.platformArch}`;
-      const files = fs.readdirSync(BIN_DIR).filter((f) => f.startsWith("sherpa-onnx"));
-      files.forEach((file) => {
-        const isLibrary = config.libPattern && matchesPattern(file, config.libPattern);
-        if (
-          !file.startsWith(wsPrefix) &&
-          !file.startsWith(onlineWsPrefix) &&
-          !file.startsWith(diarizePrefix) &&
-          !isLibrary
-        ) {
-          console.log(`Removing old binary: ${file}`);
-          fs.unlinkSync(path.join(BIN_DIR, file));
-        }
-      });
+      cleanupFiles(BIN_DIR, "sherpa-onnx", [
+        `sherpa-onnx-ws-${args.platformArch}`,
+        `sherpa-onnx-online-ws-${args.platformArch}`,
+        `sherpa-onnx-diarize-${args.platformArch}`,
+      ]);
     }
   } else {
     console.log("Downloading binaries for all platforms:");

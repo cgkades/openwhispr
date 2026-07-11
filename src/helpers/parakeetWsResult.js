@@ -8,40 +8,54 @@ function parseOfflineMessage(message) {
   }
 }
 
-function parseOnlineMessages(messages) {
-  const texts = [];
+// Incremental accumulator over online (streaming) server messages: each raw
+// message is parsed once on arrival, finalized segments are deduped by segment
+// id, and text() returns the finalized text plus the trailing partial.
+function createOnlineAccumulator() {
   const finalizedSegments = new Set();
-  let latest = null;
+  let finalizedText = "";
+  let partialText = "";
+  let fallbackKey = 0;
 
-  for (const message of messages) {
-    let parsed;
-    try {
-      parsed = JSON.parse(message);
-    } catch {
-      parsed = { text: message };
-    }
+  const text = () =>
+    finalizedText && partialText ? `${finalizedText} ${partialText}` : finalizedText || partialText;
 
-    if (!parsed || typeof parsed !== "object") continue;
+  return {
+    push(message) {
+      let parsed;
+      try {
+        parsed = JSON.parse(message);
+      } catch {
+        parsed = { text: message };
+      }
+      if (!parsed || typeof parsed !== "object") return text();
 
-    const text = String(parsed.text ?? "").trim();
-    if (!text) continue;
+      const messageText = String(parsed.text ?? "").trim();
+      if (!messageText) return text();
 
-    latest = parsed;
-    if (!parsed.is_final) continue;
+      if (!parsed.is_final) {
+        partialText = finalizedSegments.has(parsed.segment) ? "" : messageText;
+        return text();
+      }
 
-    const segment = parsed.segment ?? `${texts.length}:${text}`;
-    if (!finalizedSegments.has(segment)) {
-      finalizedSegments.add(segment);
-      texts.push(text);
-    }
-  }
-
-  const latestText = String(latest?.text ?? "").trim();
-  if (latestText && !latest?.is_final && !finalizedSegments.has(latest?.segment)) {
-    texts.push(latestText);
-  }
-
-  return texts.join(" ").trim();
+      const segment = parsed.segment ?? `fallback:${fallbackKey++}`;
+      if (!finalizedSegments.has(segment)) {
+        finalizedSegments.add(segment);
+        finalizedText = finalizedText ? `${finalizedText} ${messageText}` : messageText;
+      }
+      partialText = "";
+      return text();
+    },
+    text,
+  };
 }
 
-module.exports = { parseOfflineMessage, parseOnlineMessages };
+function parseOnlineMessages(messages) {
+  const accumulator = createOnlineAccumulator();
+  for (const message of messages) {
+    accumulator.push(message);
+  }
+  return accumulator.text();
+}
+
+module.exports = { parseOfflineMessage, parseOnlineMessages, createOnlineAccumulator };

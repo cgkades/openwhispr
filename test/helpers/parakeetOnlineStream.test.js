@@ -66,8 +66,8 @@ test("online stream emits live updates and finish resolves with the final text",
     });
 
     // Chunks sent before the socket opens must be queued, not dropped.
-    stream.sendPcm(pcm16ToFloat32(Buffer.alloc(3200)));
-    stream.sendPcm(pcm16ToFloat32(Buffer.alloc(3200)));
+    stream.sendPcm16(Buffer.alloc(3200));
+    stream.sendFloat32(pcm16ToFloat32(Buffer.alloc(3200)));
 
     const { text } = await stream.finish();
 
@@ -101,8 +101,8 @@ test("finalized segments accumulate across endpoints in live updates", async () 
       },
     });
 
-    stream.sendPcm(pcm16ToFloat32(Buffer.alloc(3200)));
-    stream.sendPcm(pcm16ToFloat32(Buffer.alloc(3200)));
+    stream.sendPcm16(Buffer.alloc(3200));
+    stream.sendPcm16(Buffer.alloc(3200));
 
     const { text } = await stream.finish();
 
@@ -127,7 +127,7 @@ test("abort closes the stream without waiting for the server", async () => {
   const mock = await startMockOnlineServer({});
   try {
     const stream = onlineWsServerAt(mock.port).createOnlineStream({});
-    stream.sendPcm(pcm16ToFloat32(Buffer.alloc(3200)));
+    stream.sendPcm16(Buffer.alloc(3200));
     stream.abort();
     const { text } = await stream.finish();
     assert.equal(text, "");
@@ -143,11 +143,8 @@ test("pcm16ToFloat32 converts int16 samples to normalized float32", () => {
   pcm.writeInt16LE(-16384, 4);
   pcm.writeInt16LE(-32768, 6);
 
-  const out = pcm16ToFloat32(pcm);
-  const floats = new Float32Array(out.buffer, out.byteOffset, 4);
+  const floats = pcm16ToFloat32(pcm);
 
-  assert.equal(floats[0], 0);
-  assert.equal(floats[1], 0.5);
-  assert.equal(floats[2], -0.5);
-  assert.equal(floats[3], -1);
+  assert.ok(floats instanceof Float32Array);
+  assert.deepEqual(Array.from(floats), [0, 0.5, -0.5, -1]);
 });
