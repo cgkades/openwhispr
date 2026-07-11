@@ -51,8 +51,8 @@
     "nemotron-speech-streaming-en-0.6b": {
       "name": "Nemotron Speech Streaming EN 0.6B",
       "description": "English streaming ASR from NVIDIA Nemotron",
-      "size": "464MB",
-      "sizeMb": 464,
+      "size": "632MB",
+      "sizeMb": 632,
       "language": "en",
       "supportedLanguages": ["en"],
       "runtime": "online",
