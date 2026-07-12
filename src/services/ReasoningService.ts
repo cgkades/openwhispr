@@ -305,7 +305,10 @@ class ReasoningService extends BaseReasoningService {
     config: ReasoningConfig = {}
   ): Promise<string> {
     const trimmedModel = model?.trim?.() || "";
-    const isLanCleanup = !!config.lanUrl || this.isLanCleanupMode();
+    // A system prompt identifies agent/chat work. Do not let the separate
+    // Dictation Cleanup self-hosted setting reroute those requests.
+    const isLanCleanup =
+      !!config.lanUrl?.trim() || (!config.systemPrompt?.trim() && this.isLanCleanupMode());
     const providerId = isLanCleanup ? "lan" : config.provider || getModelProvider(trimmedModel);
 
     if (!trimmedModel && providerId !== "openwhispr" && providerId !== "lan") {
@@ -373,7 +376,9 @@ class ReasoningService extends BaseReasoningService {
 
     const settings = getSettings();
     const lanOverride = config.lanUrl?.trim();
-    const isLanCleanup = !!lanOverride || this.isLanCleanupMode();
+    // Chat/agent calls provide a system prompt and must keep their own scope
+    // routing; only cleanup calls inherit the global cleanup LAN setting.
+    const isLanCleanup = !!lanOverride || (!config.systemPrompt?.trim() && this.isLanCleanupMode());
 
     let endpoint: string;
     let apiKey = "";
@@ -591,7 +596,9 @@ class ReasoningService extends BaseReasoningService {
     const isLocalProvider = !isEnterprise && !cloudProviders.includes(provider);
 
     const settings = getSettings();
-    const isLanCleanup = !isEnterprise && (!!lanOverride || this.isLanCleanupMode());
+    // Do not let Dictation Cleanup's LAN setting hijack Chat Intelligence.
+    const isLanCleanup =
+      !isEnterprise && (!!lanOverride || (!config.systemPrompt?.trim() && this.isLanCleanupMode()));
 
     if ((isLocalProvider || isLanCleanup) && !tools) {
       const contentGen = this.processTextStreaming(messages, model, provider, config);

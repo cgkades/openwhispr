@@ -8,9 +8,9 @@ test("byok cloud provider maps to the providers mode", async () => {
   assert.equal(deriveReasoningMode("byok", "corti"), "providers");
 });
 
-test("byok custom provider maps to the self-hosted mode", async () => {
+test("byok custom provider maps to the providers mode", async () => {
   const { deriveReasoningMode } = await load();
-  assert.equal(deriveReasoningMode("byok", "custom"), "self-hosted");
+  assert.equal(deriveReasoningMode("byok", "custom"), "providers");
 });
 
 test("openwhispr cloud mode maps to the openwhispr mode", async () => {

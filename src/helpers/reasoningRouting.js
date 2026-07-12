@@ -1,8 +1,9 @@
 // Map a reasoning cloud routing to the InferenceMode its Settings tab selects on.
-// Mirrors deriveTranscriptionMode (byok custom → self-hosted, other cloud → providers).
+// Custom is a BYOK cloud provider, so it belongs in the providers mode just
+// like the built-in cloud providers. Self-hosted is reserved for LAN endpoints.
 export function deriveReasoningMode(cloudMode, provider) {
   if (cloudMode === "byok") {
-    return provider === "custom" ? "self-hosted" : "providers";
+    return "providers";
   }
   return "openwhispr";
 }
