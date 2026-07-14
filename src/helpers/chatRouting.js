@@ -12,6 +12,8 @@ const CLOUD_CHAT_PROVIDERS = new Set([
 // Resolve Chat from Chat-owned settings only. In particular, this must never
 // consult Dictation Cleanup's mode or endpoint.
 export function resolveChatRoute({ provider, lanUrl, customApiKey, isEnterpriseProvider = false }) {
+  // An explicit self-hosted URL is the caller's declared route — it wins even
+  // over a stale enterprise provider id left in settings.
   const baseUrl = lanUrl?.trim() || "";
   if (baseUrl) {
     return {

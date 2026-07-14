@@ -26,6 +26,7 @@ const liveSpeakerIdentifier = require("./liveSpeakerIdentifier");
 const MeetingEchoLeakDetector = require("./meetingEchoLeakDetector");
 const { partitionPendingMicFinals, isWithinRetractWindow } = require("./meetingMicHoldback");
 const { applySmartSpacing } = require("./smartSpacing");
+const { applyAutoLearnSetting } = require("./autoLearnSetting");
 const {
   transcriptsOverlap,
   transcriptsLooselyOverlap,
@@ -965,7 +966,10 @@ class IPCHandlers {
 
     // Dictionary handlers
     ipcMain.on("auto-learn-changed", (_event, enabled) => {
-      this._autoLearnEnabled = !!enabled;
+      // Both renderer windows re-sync this on mount — ignore same-value updates (#1080).
+      const { changed, enabled: next } = applyAutoLearnSetting(this._autoLearnEnabled, enabled);
+      if (!changed) return;
+      this._autoLearnEnabled = next;
       if (!this._autoLearnEnabled) {
         if (this._autoLearnDebounceTimer) {
           clearTimeout(this._autoLearnDebounceTimer);
@@ -3979,8 +3983,40 @@ class IPCHandlers {
           preferredLanguage && preferredLanguage !== "auto"
             ? preferredLanguage.split("-")[0]
             : undefined;
+        const { resolveSelfHostedRetryRoute } = await import("./retryTranscriptionRouting.js");
+        const selfHostedRoute = resolveSelfHostedRetryRoute(settings);
 
-        if (settings?.useLocalWhisper) {
+        if (selfHostedRoute?.kind === "configuration-error") {
+          throw new Error(selfHostedRoute.error);
+        }
+
+        if (selfHostedRoute?.kind === "self-hosted") {
+          const formData = new FormData();
+          formData.append("file", new Blob([buffer], { type: "audio/webm" }), "audio.webm");
+          if (selfHostedRoute.model) {
+            formData.append("model", selfHostedRoute.model);
+          }
+          if (language) {
+            formData.append("language", language);
+          }
+
+          const response = await proxyFetch(selfHostedRoute.endpoint, {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Self-hosted API Error: ${response.status} ${errorText}`);
+          }
+          const data = await response.json();
+          if (data?.text) {
+            result = {
+              text: data.text,
+              source: "self-hosted",
+              model: selfHostedRoute.model,
+            };
+          }
+        } else if (settings?.useLocalWhisper) {
           if (settings.localTranscriptionProvider === "nvidia") {
             const model =
               settings.parakeetModel || process.env.PARAKEET_MODEL || "parakeet-tdt-0.6b-v3";
@@ -5508,11 +5544,20 @@ class IPCHandlers {
     let dictationPreviewLanguage = null;
     let dictationPreviewSessionActive = false;
     let dictationPreviewChunkCount = 0;
+    // Online-runtime models stream here instead of the 1.5s chunked path.
+    let dictationPreviewStream = null;
+    // Bumped on every reset so async preview work can detect a stale session.
+    let dictationPreviewGen = 0;
 
     const resetDictationPreviewState = ({ preserveSession = false } = {}) => {
+      dictationPreviewGen++;
       if (dictationPreviewTimer) {
         clearInterval(dictationPreviewTimer);
         dictationPreviewTimer = null;
+      }
+      if (dictationPreviewStream) {
+        dictationPreviewStream.abort();
+        dictationPreviewStream = null;
       }
       dictationPreviewMode = false;
       if (!preserveSession) {
@@ -6208,6 +6253,7 @@ class IPCHandlers {
 
     ipcMain.handle("start-dictation-preview", async (_event, { provider, model, language }) => {
       resetDictationPreviewState();
+      const gen = dictationPreviewGen;
       dictationPreviewMode = true;
       dictationPreviewSessionActive = true;
       dictationPreviewProvider = provider;
@@ -6215,6 +6261,35 @@ class IPCHandlers {
       dictationPreviewLanguage = language || null;
       dictationPreviewChunkCount = 0;
       this.windowManager.showTranscriptionPreview("");
+
+      if (provider === "nvidia" && this.parakeetManager.supportsOnlineStreaming(model)) {
+        try {
+          const stream = await this.parakeetManager.createOnlineStream(model, {
+            onUpdate: (text) => {
+              if (gen === dictationPreviewGen && text) {
+                this.windowManager.showTranscriptionPreview(text);
+              }
+            },
+          });
+          if (gen !== dictationPreviewGen) {
+            stream.abort();
+            return { success: true };
+          }
+          dictationPreviewStream = stream;
+          for (const chunk of dictationPreviewBuffer) {
+            stream.sendPcm16(chunk);
+          }
+          dictationPreviewBuffer = [];
+          return { success: true };
+        } catch (error) {
+          debugLogger.warn("Online preview stream unavailable, falling back to chunked preview", {
+            model,
+            error: error.message,
+          });
+        }
+      }
+
+      if (gen !== dictationPreviewGen) return { success: true };
       dictationPreviewTimer = setInterval(() => transcribeDictationPreviewChunk(), 1500);
       return { success: true };
     });
@@ -6229,9 +6304,12 @@ class IPCHandlers {
           bufferSize: dictationPreviewBuffer.length,
         });
       }
-      dictationPreviewBuffer.push(
-        Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer)
-      );
+      const pcm = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
+      if (dictationPreviewStream) {
+        dictationPreviewStream.sendPcm16(pcm);
+        return;
+      }
+      dictationPreviewBuffer.push(pcm);
     });
 
     ipcMain.handle("dismiss-dictation-preview", async () => {
@@ -6272,7 +6350,16 @@ class IPCHandlers {
       }
       clearInterval(dictationPreviewTimer);
       dictationPreviewTimer = null;
-      await transcribeDictationPreviewChunk();
+      if (dictationPreviewStream) {
+        const stream = dictationPreviewStream;
+        dictationPreviewStream = null;
+        const { text } = await stream.finish().catch(() => ({ text: "" }));
+        if (text && dictationPreviewSessionActive) {
+          this.windowManager.showTranscriptionPreview(text);
+        }
+      } else {
+        await transcribeDictationPreviewChunk();
+      }
       resetDictationPreviewState({ preserveSession: true });
       if (!dictationPreviewSessionActive) {
         return { success: true };
